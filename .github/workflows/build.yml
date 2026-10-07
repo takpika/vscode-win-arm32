@@ -1,0 +1,136 @@
+# Windows on ARM32 build of VSCode (win32-arm), with the Windows on ARM32 port of Electron
+# (winrt/ci/electron.env). A tag v*-win-arm32 also publishes the zip as a GitHub release.
+name: Build
+on:
+  push:
+    branches: ['**']
+    tags: ['v*-win-arm32*']
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  # The Electron port's toolchain, built from its recipes once and cached by the Electron commit.
+  toolchain:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 358
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: winrt
+          fetch-depth: 1
+      - id: key
+        run: echo "key=sdk-${{ hashFiles('winrt/ci/electron.env', 'winrt/ci/Dockerfile', 'winrt/ci/toolchain.sh') }}" >> "$GITHUB_OUTPUT"
+      - run: sudo mkdir -p /home/winrt && sudo chown "$(id -u):$(id -g)" /home/winrt
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: /home/winrt/sdk
+          lookup-only: true
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./winrt/ci/image
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          winrt/ci/run checkout.sh
+          winrt/ci/run toolchain.sh
+          sudo chown -R "$(id -u):$(id -g)" /home/winrt
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: /home/winrt/sdk
+
+  rg:
+    needs: toolchain
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: winrt
+          fetch-depth: 1
+      - run: sudo mkdir -p /home/winrt && sudo chown "$(id -u):$(id -g)" /home/winrt
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ needs.toolchain.outputs.key }}
+          path: /home/winrt/sdk
+          fail-on-cache-miss: true
+      - uses: ./winrt/ci/image
+        with:
+          target: rust
+      - run: winrt/ci/run rg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rg
+          path: /home/winrt/rg/rg.exe
+          retention-days: 7
+
+  package:
+    needs: [toolchain, rg]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Prepare /home/winrt
+        run: |
+          sudo mkdir -p /home/winrt && sudo chown "$(id -u):$(id -g)" /home/winrt
+          sudo swapoff -a || true
+          sudo fallocate -l 16G /swapfile2 && sudo chmod 600 /swapfile2 && sudo mkswap /swapfile2 && sudo swapon /swapfile2
+          free -g; df -h /
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ needs.toolchain.outputs.key }}
+          path: /home/winrt/sdk
+          fail-on-cache-miss: true
+      - uses: ./winrt/ci/image
+      - name: Electron source tree
+        run: winrt/ci/run checkout.sh
+      - name: Electron release files
+        run: winrt/ci/run electron.sh
+      - name: npm dependencies
+        run: winrt/ci/run deps.sh
+      - name: Native modules
+        run: winrt/ci/run native.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-logs
+          path: /home/winrt/src/out/electron/vscode_native/logs
+          retention-days: 7
+      - uses: actions/download-artifact@v4
+        with:
+          name: rg
+          path: /home/winrt/rg
+      - name: Package
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: winrt/ci/run package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: /home/winrt/dist/*
+          retention-days: 14
+          compression-level: 0
+      - if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . winrt/ci/electron.env
+          v=$(ls /home/winrt/dist | sed -n 's/^VSCode-win32-arm-\(.*\)\.zip$/\1/p')
+          gh release create "$GITHUB_REF_NAME" /home/winrt/dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --notes-file - <<EOF
+          Visual Studio Code - Open Source ("Code - OSS") $v for Windows on ARM32 (Windows RT 8.1 /
+          Windows 11 on ARM, 32-bit ARM), packaged with Electron from
+          https://github.com/$ELECTRON_REPO/releases/tag/$ELECTRON_TAG.
+
+          - VSCode-win32-arm-$v.zip: unzip and run "Code - OSS.exe".
+          EOF

@@ -1,0 +1,131 @@
+# VSCode 1.80.1's native modules for win-arm32: the product build step, plus a
+# probe staging for testing them on a device. Run in the Electron build directory,
+# after `electron`, `electron:electron_dist_zip` and
+# `third_party/electron_node:copy_headers`:
+#   ninja -C out/electron -f /home/winrt/toolchains/win_mingw_fixes/vscode_native.ninja vscode_native_modules
+#   ninja -C out/electron -f /home/winrt/toolchains/win_mingw_fixes/vscode_native.ninja vscode_native_probe
+#
+# vscode_native_modules: the packages with a binding.gyp in VSCode's dependency
+# tree (out/vscode-nm-src/app: a fetch-only `yarn install
+# --ignore-scripts --frozen-lockfile` of src/vscode) and their dependency
+# closure are copied to vscode_native/node_modules (vscode_native_sources.py;
+# every copied file is a dependency through its depfile) and the
+# backports in vscode_native_patches/ are applied to the copy,
+# node.lib is made from electron.lib, and each module is built as its install
+# script builds it -- `node-gyp rebuild` (@parcel/watcher's node-gyp-build and
+# keytar's prebuild-install find no win32-arm prebuild and run the same) -- by
+# Node 16.17.1's bundled node-gyp 9.0.0 under the tree's Node 16, with
+# gyp_make_win.py as generator and addon_toolchain.py as CC/CXX/LINK/AR.
+# vscode_native/node_modules holds the built modules VSCode's packaging overlays
+# onto the app's node_modules; vscode_native/logs/<module>.log keeps make's
+# commands (V=1) and every final clang-cl / lld-link command.
+#
+# vscode_native_probe: dist.zip unpacked to vscode_native/bin with electron.exe
+# renamed Code.exe (as VSCode renames it) and resources/app = vscode_native_probe/
+# + the built node_modules.
+
+tc = /home/winrt/toolchains/win_mingw_fixes
+nm_src = ../vscode-nm-src/app/node_modules
+nm = vscode_native/node_modules
+abi = vscode_native/abi
+# The installed toolchain's compiler and linker (addon_toolchain.py runs them
+# through toolchain.ninja's rules), so a toolchain reinstall rebuilds.
+clang = /home/winrt/sdk/llvm-mingw-winrt/bin/clang-23
+lld = /home/winrt/sdk/llvm-mingw-winrt/bin/lld
+# The gn that generated this build directory (build.ninja's `rule gn`).
+gn = ../../../../../usr/local/bin/gn
+# ($$o is the Electron build directory, set before cd-ing into a module.)
+node_bin = $$o/../../third_party/node/linux/node-linux-arm64/bin
+node_gyp = $$o/../../third_party/electron_node/deps/npm/node_modules/node-gyp/bin/node-gyp.js
+# The node-gyp environment: `cmd` (winpty_cmd.py, for node-pty's winpty.gyp)
+# and the tree's Node 16 first on PATH (binding.gyp <!(node ...) expansions);
+# gyp's Windows translation pointed at the port's Visual Studio stand-in;
+# make's compiler/linker/archiver = addon_toolchain.py.
+gyp_env = PATH=$$o/vscode_native/hostbin:$node_bin:$$PATH $
+    GYP_DEFINES="OS=win target_arch=arm" $
+    GYP_MSVS_VERSION=2015 GYP_MSVS_OVERRIDE_PATH=/home/winrt/sdk/winrt-sdk/vs $
+    WRT_ELECTRON_OUT=$$o WRT_ADDON_ABI_DIR=$$o/$abi $
+    WRT_ADDON_ECHO=1 V=1 $
+    CC="python3 $tc/addon_toolchain.py cc" CXX="python3 $tc/addon_toolchain.py cxx" $
+    LINK="python3 $tc/addon_toolchain.py link" AR="python3 $tc/addon_toolchain.py ar"
+
+rule sources
+  command = python3 $tc/vscode_native_sources.py $nm_src $nm vscode_native/modules.txt vscode_native/modules.d $tc/vscode_native_patches
+  depfile = vscode_native/modules.d
+  deps = gcc
+  description = COPY vscode native modules
+# node-gyp links addons against <nodedir>/$(Configuration)/node.lib; upstream
+# Electron ships node.lib = electron.lib (the import library of the host).
+rule node_lib
+  command = mkdir -p gen/node_headers/Release && cp electron.lib gen/node_headers/node.lib && cp electron.lib gen/node_headers/Release/node.lib
+  description = NODE_LIB from electron.lib
+# What gn reports for the C++ target configuration (addon_toolchain.py's
+# ABI_CONFIGS), from a C++ target of the arm toolchain.
+rule gn_blame
+  command = mkdir -p $abi && $gn --root=../.. desc . //third_party/electron_node:node_lib $what --blame > $out
+  description = GN_DESC $what
+# Chromium's libc++ objects as an archive for the addon links (addon_toolchain.py
+# _cxx_runtime).
+rule cxxlib
+  command = WRT_ELECTRON_OUT=$$PWD WRT_ADDON_ABI_DIR=$$PWD/$abi python3 $tc/addon_toolchain.py cxxlib $out
+  description = CXXLIB $out
+# `cmd` on PATH for node-pty's winpty.gyp (out/ is the exec-allowed tree).
+rule host_cmd
+  command = mkdir -p vscode_native/hostbin && printf '#!/bin/sh\nexec python3 %s "$$@"\n' $tc/winpty_cmd.py > $out && chmod +x $out
+  description = HOST_CMD $out
+# Every module is built and logged; the step fails if any module failed.
+# The stamp lists every binary the modules' builds produced (build/Release
+# *.node, *.dll, *.exe); the probe staging fails if one of them is missing.
+rule node_gyp
+  command = o=$$PWD && rm -rf vscode_native/logs && mkdir -p vscode_native/logs && failed= && $
+      for m in $$(cat $in); do $
+        log=vscode_native/logs/$$(echo $$m | tr -d @ | tr / _).log; $
+        (cd $nm/$$m && env $gyp_env node $node_gyp rebuild --nodedir=$$o/gen/node_headers --arch=arm -- -f $tc/gyp_make_win.py) > $$log 2>&1 || failed="$$failed $$m"; $
+      done; $
+      if [ -n "$$failed" ]; then echo "node-gyp failed:$$failed"; exit 1; fi; $
+      find $nm -path '*/build/Release/*' \( -name '*.node' -o -name '*.dll' -o -name '*.exe' \) | sort > $out
+  description = NODE_GYP vscode native modules
+rule unpack
+  command = rm -rf $outdir && python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" $in $outdir && mv $outdir/electron.exe $out
+  description = UNPACK $out
+rule app
+  command = while read f; do [ -f "$$f" ] || { echo "missing $$f"; exit 1; }; done < vscode_native/modules.stamp && $
+      rm -rf $app && mkdir -p $app && cp $tc/vscode_native_probe/main.js $tc/vscode_native_probe/package.json $app/ && cp -R $nm $app/node_modules && touch $out
+  description = STAGE $app
+
+build vscode_native/modules.txt $nm/.vscode_native_sources: sources | $
+    $tc/vscode_native_sources.py
+build gen/node_headers/node.lib gen/node_headers/Release/node.lib: node_lib electron.lib
+build vscode_native/hostbin/cmd: host_cmd | $tc/winpty_cmd.py
+build $abi/libc++.lib: cxxlib | $tc/addon_toolchain.py $
+    obj/buildtools/third_party/libc++/libc++.ninja toolchain.ninja $lld
+build $abi/cflags.txt: gn_blame | build.ninja
+  what = cflags
+build $abi/cflags_c.txt: gn_blame | build.ninja
+  what = cflags_c
+build $abi/cflags_cc.txt: gn_blame | build.ninja
+  what = cflags_cc
+build $abi/defines.txt: gn_blame | build.ninja
+  what = defines
+build $abi/include_dirs.txt: gn_blame | build.ninja
+  what = include_dirs
+build vscode_native/modules.stamp: node_gyp vscode_native/modules.txt | $
+    $nm/.vscode_native_sources $
+    vscode_native/hostbin/cmd $abi/cflags.txt $abi/cflags_c.txt $
+    $abi/cflags_cc.txt $abi/defines.txt $abi/include_dirs.txt $
+    $abi/libc++.lib $tc/addon_toolchain.py $tc/gyp_make_win.py $
+    toolchain.ninja obj/buildtools/third_party/libc++abi/libc++abi.ninja $
+    $clang $lld $
+    gen/node_headers/include/node/node_version.h $
+    gen/node_headers/include/node/common.gypi $
+    gen/node_headers/include/node/config.gypi $
+    gen/node_headers/Release/node.lib
+build vscode_native_modules: phony vscode_native/modules.stamp
+
+bin = vscode_native/bin
+app = $bin/resources/app
+build $bin/Code.exe: unpack dist.zip
+  outdir = $bin
+build vscode_native/app.stamp: app | $bin/Code.exe vscode_native/modules.stamp $
+    $tc/vscode_native_probe/main.js $tc/vscode_native_probe/package.json
+build vscode_native_probe: phony vscode_native/app.stamp

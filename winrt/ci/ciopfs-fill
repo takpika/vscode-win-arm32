@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+"""ciopfs-fill SRC DST: copy the tree SRC into DST (a ciopfs mount), keeping modes and symlinks.
+A symlink whose name differs only in case from another entry of the same directory is a
+case alias (xwin creates them for case-sensitive file systems); under ciopfs both names are
+the same file, so the alias is skipped. Any other name collision is an error."""
+import os, shutil, sys
+
+src, dst = sys.argv[1], sys.argv[2]
+skipped = 0
+for root, dirs, files in os.walk(src):
+    rel = os.path.relpath(root, src)
+    out = os.path.normpath(os.path.join(dst, rel))
+    names = dirs + files
+    real = {n.lower() for n in names if not os.path.islink(os.path.join(root, n))}
+    seen = set()
+    for n in sorted(names, key=lambda n: os.path.islink(os.path.join(root, n))):   # real entries first
+        p, q = os.path.join(root, n), os.path.join(out, n)
+        if n.lower() in seen:
+            if os.path.islink(p) and n.lower() in real:
+                skipped += 1
+                continue
+            sys.exit(f"case collision that is not an alias symlink: {p}")
+        seen.add(n.lower())
+        if os.path.islink(p):
+            os.symlink(os.readlink(p), q)
+        elif os.path.isdir(p):
+            os.mkdir(q); shutil.copymode(p, q)
+        else:
+            shutil.copyfile(p, q); shutil.copymode(p, q)
+    dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+print(f"filled {dst} from {src}; skipped {skipped} case-alias symlinks")

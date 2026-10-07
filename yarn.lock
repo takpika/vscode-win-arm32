@@ -7720,6 +7720,11 @@ pause-stream@0.0.11, pause-stream@^0.0.11:
   dependencies:
     through "~2.3"
 
+pe-library@^0.4.1:
+  version "0.4.1"
+  resolved "https://registry.yarnpkg.com/pe-library/-/pe-library-0.4.1.tgz#e269be0340dcb13aa6949d743da7d658c3e2fbea"
+  integrity sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw==
+
 peek-readable@^5.0.0:
   version "5.0.0"
   resolved "https://registry.yarnpkg.com/peek-readable/-/peek-readable-5.0.0.tgz#7ead2aff25dc40458c60347ea76cfdfd63efdfec"
@@ -8592,6 +8597,13 @@ require-main-filename@^2.0.0:
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/require-main-filename/-/require-main-filename-2.0.0.tgz#d0b329ecc7cc0f61649f62215be69af54aa8989b"
   integrity sha512-NKN5kMDylKuldxYLSUfrbo5Tuzh4hd+2E8NPPX02mZtn1VuREQToYe/ZdlJy+J3uCpfaiGF05e7B8W0iXbQHmg==
+
+resedit@1.7.2:
+  version "1.7.2"
+  resolved "https://registry.yarnpkg.com/resedit/-/resedit-1.7.2.tgz#b1041170b99811710c13f949c7d225871de4cc78"
+  integrity sha512-vHjcY2MlAITJhC0eRD/Vv8Vlgmu9Sd3LX9zZvtGzU5ZImdTN3+d6e/4mnTyV8vEbyf1sgNIrWxhWlrys52OkEA==
+  dependencies:
+    pe-library "^0.4.1"
 
 resolve-alpn@^1.0.0:
   version "1.2.1"

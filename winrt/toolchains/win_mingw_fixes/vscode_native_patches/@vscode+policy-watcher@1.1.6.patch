@@ -1,0 +1,11 @@
+--- a/src/windows/PolicyWatcher.cc
++++ b/src/windows/PolicyWatcher.cc
+@@ -72,7 +72,7 @@
+     }
+ 
+     if (first || updatedPolicies.size() > 0)
+-      progress.Send(&updatedPolicies[0], updatedPolicies.size());
++      progress.Send(updatedPolicies.data(), updatedPolicies.size());
+ 
+     first = false;
+ 
