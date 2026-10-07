@@ -1,0 +1,79 @@
+diff --git a/napi-inl.h b/napi-inl.h
+index 5e51cc3..c2968bb 100644
+--- a/napi-inl.h
++++ b/napi-inl.h
+@@ -1928,11 +1928,16 @@ inline void DataView::WriteData(size_t byteOffset, T value) const {
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ inline TypedArray::TypedArray()
+-  : Object(), _type(TypedArray::unknown_array_type), _length(0) {
++  : Object(), _type(napi_typedarray_type::napi_int8_array), _length(0) {
+ }
+ 
+ inline TypedArray::TypedArray(napi_env env, napi_value value)
+-  : Object(env, value), _type(TypedArray::unknown_array_type), _length(0) {
++  : Object(env, value), _type(napi_typedarray_type::napi_int8_array), _length(0) {
++  if (value != nullptr) {
++    napi_status status = napi_get_typedarray_info(_env, _value,
++      &_type, &_length, nullptr, nullptr, nullptr);
++    NAPI_THROW_IF_FAILED_VOID(_env, status);
++  }
+ }
+ 
+ inline TypedArray::TypedArray(napi_env env,
+@@ -1943,18 +1948,11 @@ inline TypedArray::TypedArray(napi_env env,
+ }
+ 
+ inline napi_typedarray_type TypedArray::TypedArrayType() const {
+-  if (_type == TypedArray::unknown_array_type) {
+-    napi_status status = napi_get_typedarray_info(_env, _value,
+-      &const_cast<TypedArray*>(this)->_type, &const_cast<TypedArray*>(this)->_length,
+-      nullptr, nullptr, nullptr);
+-    NAPI_THROW_IF_FAILED(_env, status, napi_int8_array);
+-  }
+-
+   return _type;
+ }
+ 
+ inline uint8_t TypedArray::ElementSize() const {
+-  switch (TypedArrayType()) {
++  switch (_type) {
+     case napi_int8_array:
+     case napi_uint8_array:
+     case napi_uint8_clamped_array:
+@@ -1978,13 +1976,6 @@ inline uint8_t TypedArray::ElementSize() const {
+ }
+ 
+ inline size_t TypedArray::ElementLength() const {
+-  if (_type == TypedArray::unknown_array_type) {
+-    napi_status status = napi_get_typedarray_info(_env, _value,
+-      &const_cast<TypedArray*>(this)->_type, &const_cast<TypedArray*>(this)->_length,
+-      nullptr, nullptr, nullptr);
+-    NAPI_THROW_IF_FAILED(_env, status, 0);
+-  }
+-
+   return _length;
+ }
+ 
+diff --git a/napi.h b/napi.h
+index 8475bfc..82f56c2 100644
+--- a/napi.h
++++ b/napi.h
+@@ -1072,8 +1072,6 @@ namespace Napi {
+ 
+     TypedArray(napi_env env, napi_value value, napi_typedarray_type type, size_t length);
+ 
+-    static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(-1);
+-
+     template <typename T>
+     static
+ #if defined(NAPI_HAS_CONSTEXPR)
+@@ -1092,7 +1090,7 @@ namespace Napi {
+         : std::is_same<T, int64_t>::value ? napi_bigint64_array
+         : std::is_same<T, uint64_t>::value ? napi_biguint64_array
+ #endif  // NAPI_VERSION > 5
+-        : unknown_array_type;
++        : napi_int8_array;
+     }
+     /// !endcond
+   };

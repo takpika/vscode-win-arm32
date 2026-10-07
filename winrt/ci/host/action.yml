@@ -1,0 +1,36 @@
+name: Build host
+description: >-
+  Prepares the runner: /home/winrt, swap, and disk space. On the x86_64 runners (smaller root
+  file system, a second disk on /mnt) the preinstalled toolsets this build never uses are removed,
+  /home/winrt lives on /mnt, and the build directory (OUT, once the checkout exists) on the root
+  file system; on aarch64 runners everything stays on the root file system.
+inputs:
+  swap:
+    description: swap to add, in GiB (0 for none)
+    default: '0'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -eu
+        if [ "$(uname -m)" = x86_64 ] && mountpoint -q /mnt; then
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm \
+            /opt/microsoft /opt/google /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/local/lib/node_modules /opt/az /usr/share/miniconda
+          sudo docker image prune -a -f >/dev/null
+          sudo mkdir -p /mnt/winrt /home/winrt
+          sudo chown "$(id -u):$(id -g)" /mnt/winrt
+          sudo mount --bind /mnt/winrt /home/winrt
+          echo "WINRT_OUT_DISK=/var/winrt-out" >> "$GITHUB_ENV"
+        else
+          sudo mkdir -p /home/winrt
+        fi
+        sudo chown "$(id -u):$(id -g)" /home/winrt
+        if [ "${{ inputs.swap }}" != 0 ]; then
+          sudo swapoff -a || true
+          sudo fallocate -l "${{ inputs.swap }}G" /swapfile2 && sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2 && sudo swapon /swapfile2
+        fi
+        free -g; df -h / /mnt /home/winrt

@@ -1,0 +1,57 @@
+diff -ruN a/src/win32.js b/src/win32.js
+--- a/src/win32.js	2026-10-07 00:22:22.696848507 +0000
++++ b/src/win32.js	2026-10-07 00:22:22.705520299 +0000
+@@ -56,9 +56,12 @@
+ 
+ function patchExecutable(opts) {
+   return es.map(function (f, cb) {
++    // Off Windows, signtool and rcedit (Windows executables) cannot run; the
++    // edit is done by the caller-supplied opts.win32ResourceEditor(file,
++    // patch) -> Promise, taking rcedit's options, if there is one.
+     if (
+       f.relative !== getOriginalAppFullName(opts) ||
+-      process.platform !== "win32"
++      (process.platform !== "win32" && !opts.win32ResourceEditor)
+     ) {
+       return cb(null, f);
+     }
+@@ -86,14 +89,7 @@
+ 
+     f.contents.pipe(ostream);
+     ostream.on("close", function () {
+-      // Remove codesignature before editing exe file
+-      const signToolPath = getSignTool();
+-      const {error} = spawnSync(signToolPath, ["remove", "/s", tempPath]);
+-      if (error) {
+-        return cb(error);
+-      }
+-
+-      rcedit(tempPath, patch, function (err) {
++      var edited = function (err) {
+         if (err) {
+           return cb(err);
+         }
+@@ -113,7 +109,22 @@
+             cb(null, f);
+           });
+         });
+-      });
++      };
++
++      if (process.platform !== "win32") {
++        return opts.win32ResourceEditor(tempPath, patch).then(function () {
++          edited();
++        }, edited);
++      }
++
++      // Remove codesignature before editing exe file
++      const signToolPath = getSignTool();
++      const {error} = spawnSync(signToolPath, ["remove", "/s", tempPath]);
++      if (error) {
++        return cb(error);
++      }
++
++      rcedit(tempPath, patch, edited);
+     });
+   });
+ }

@@ -1,0 +1,19 @@
+name: Builder image
+description: Builds (or restores from the Actions cache) the builder image as winrt-builder.
+inputs:
+  target:
+    description: Dockerfile stage (base, or rust for the rg.exe job)
+    default: base
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/build-push-action@v6
+      with:
+        context: winrt/ci
+        file: winrt/ci/Dockerfile
+        target: ${{ inputs.target }}
+        tags: winrt-builder
+        load: true
+        cache-from: type=gha,scope=winrt-builder-${{ inputs.target }}
+        cache-to: type=gha,mode=max,scope=winrt-builder-${{ inputs.target }}

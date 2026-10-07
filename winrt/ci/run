@@ -1,0 +1,9 @@
+#!/bin/bash
+# run <script.sh|command> [args...]: runs in the builder container, with /home/winrt shared with
+# the runner and this checkout at /home/winrt/repo. Privileged for the ciopfs (FUSE) mounts.
+# GITHUB_TOKEN (when set): VSCode's build reads the built-in extensions' releases through the
+# GitHub API (build/lib/fetch.js), which limits unauthenticated requests.
+set -e
+case "$1" in *.sh) set -- bash "/home/winrt/repo/winrt/ci/$1" "${@:2}" ;; esac
+exec docker run --rm --privileged -v /home/winrt:/home/winrt -v "${GITHUB_WORKSPACE:-$PWD}:/home/winrt/repo" \
+  -e GITHUB_REPOSITORY -e GITHUB_TOKEN winrt-builder "$@"

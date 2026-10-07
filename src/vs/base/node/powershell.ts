@@ -228,9 +228,13 @@ function findPSCoreDotnetGlobalTool(): IPossiblePowerShellExe {
 }
 
 function findWinPS(): IPossiblePowerShellExe | null {
+	// A 32-bit process on a 64-bit Windows sees System32 redirected to its own
+	// bitness's system directory (SysWOW64 for x86, SysArm32 for 32-bit ARM on
+	// ARM64); SysNative reaches the native one.
+	const is32BitArmOn64BitArm = process.arch === 'arm' && osArch === Arch.ARM && !!process.env['PROCESSOR_ARCHITEW6432'];
 	const winPSPath = path.join(
 		process.env.windir!,
-		processArch === Arch.x86 && osArch !== Arch.x86 ? 'SysNative' : 'System32',
+		(processArch === Arch.x86 && osArch !== Arch.x86) || is32BitArmOn64BitArm ? 'SysNative' : 'System32',
 		'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
 	return new PossiblePowerShellExe(winPSPath, 'Windows PowerShell', true);
